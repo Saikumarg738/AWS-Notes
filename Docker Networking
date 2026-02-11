@@ -1,0 +1,614 @@
+===================
+Docker Networking
+===================
+
+Docker networking are used to make communication between the multiple containers that are running on same or different docker hosts
+
+Different Docker Networks
+
+ --> Bridge Network = Same hosts (if 2 containers wants to communicate with each other in same docker host)
+ --> Overlay Network = different hosts (2 containers want to communicate with each other in different docker hosts)
+ --> Host Network = if you want to use HOST meaning EC2 networking
+ --> None Network = if you dont want to expose any application
+
+
+-- docker node ls
+
+-- docker network ls
+
+Explain Name and Driver as per output
+
+-- docker network create reyaz
+
+-- docker network ls
+
+
+-- docker run -itd --name cont1 -p 81:80 nginx:latest
+-- docker run -itd --name cont2 -p 82:80 nginx:latest
+
+-- docker inspect cont1
+-- docker inspect cont2
+
+BY default networking part it say Bridge by default
+
+Lets change the network for cont1 to Reyaz network that we created before
+
+-- docker network connect reyaz cont1  
+-- docker network connect reyaz cont2
+
+docker network inspect Reyaz  --> this will show cont1 and cont2 in same network
+
+Lets see if 2 containers can communicate each other or not
+
+Get the IP address of cont1
+ 
+ -- docker inspect cont1
+
+
+first connect to cont2
+
+-- docker exec -it cont2 /bin/bash
+
+now you are in cont2
+
+ping IP of cont1 --> ping will not work
+
+apt update
+apt install iputils-ping -y
+ping cont1ip
+
+ctrl p q
+
+docker network disconnect Reyaz cont2 --> if you want to remove cont2 from Reyaz network
+
+docker network inspect Reyaz  --> now you cannot see cont2 in that json
+
+docker network prune --> this will delete unused networks
+
+docker system prune --> also delete the networks
+
+=========================
+Docker Python FLask Project
+=========================
+
+yum install -y docker
+
+yum install -y git
+
+git clone  https://github.com/ReyazShaik/docker-python-flask-project.git
+
+cd docker-python-flask-project
+
+Show files
+
+vi Dockerfile
+
+FROM python:3.6
+COPY . /app
+WORKDIR /app
+RUN pip install -r requirements.txt
+#ENTRYPOINT ["python"]
+EXPOSE 5000
+CMD ["python", "app.py"]
+
+Create image
+-----------
+
+docker build -t pythonapp .
+
+Create Container
+----------------
+docker run -d -p 5000:5000 pythonapp
+
+
+http://ip:5000
+
+================================
+Docker Swarm - Managing Secrets
+================================
+A secret is an information that should be kept hidden from unauthorized users and applications. Examples of secrets include usernames, passwords, private keys, certificates, and resource names and locations.
+
+vi db_password.txt
+username=Reyaz
+password=DnA@123
+
+docker secret create db_password db_password.txt
+
+docker secret ls
+docker secret inspect db_password
+
+Example 1: Using the command line interface
+-------------------------------------------
+
+docker service create --name mynginx --secret db_password nginx:latest
+
+docker ps
+
+docker exec 7be95f99dbad cat /run/secrets/db_password
+
+Example 2: Using docker compose file
+-------------------------------------
+
+vi docker-compose.yml
+
+version: '3.8'
+ 
+services:
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: webuser
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: webdatabase
+    secrets:
+      - db_password
+
+  adminer:
+    image: adminer:latest
+    ports:
+     - 8080:8080
+
+secrets:
+  db_password:
+    file: db_password.txt
+
+
+docker stack deploy --compose-file docker-compose.yml myapp
+
+
+docker exec -it ba1ffcadfa4a /bin/bash
+
+http://EC2IP:8080
+
+docker stack rm myapp
+
+docker secret rm db_password
+
+
+The secrets section in the docker compose file should be updated to tell the docker engine that the secret dp_password is created outside the compose file:
+
+secrets:
+  db_password:
+    external: true
+
+
+
+Replicated Service vs Global Service
+=====================================
+
+Replicated Service
+------------------
+Scaling up or down by giving a desired number of replicas
+
+It does not guarantee to run one replica on each node.
+
+After deleting a worker node, it will still distribute the same number of replicas mentioned while running to the available nodes.
+
+Applications are horizontally scaled up or down.
+
+Example: A web server has 5 replicas.
+
+Global Service : If we want every node to have a container which has a some service to run.
+--------------
+A global service in Docker Swarm is a service that runs a single task/container on each node in a swarm. Global services are used to monitor containers that want to run on a Swarm node.
+
+Can not scale up or down by giving a desired number.
+
+It guarantees to run one replica on each node.
+
+After deleting a node, the total replica number will decrease by one.
+
+Ideal for those that need one instance per node, like a monitoring agent.
+
+Example: A log collector is running on each node to collect logs.
+
+In the below example, we are not mentioning any replicas, but as it is global service, it will create a replica in all nodes
+
+vi docker-compose.yml
+
+version: "3.8"
+services:
+  global-nginx:
+    image: nginx
+    deploy:
+      mode: global
+    ports:
+      - "80:80"
+
+docker stack deploy -c docker-compose.yml global-stack
+
+docker service ls
+
+Command
+---------
+
+docker service create --name nginx-global \
+  --mode global \
+  --publish 80:80 \
+  nginx
+
+
+docker service ps nginx-global
+
+
+
+
+======================================================================================================================================
+
+====================================================================
+
+DOCKER - PROJECT - S-34
+
+Manager  - t2.medium
+WorkerNode1 -micro
+WorkerNode2 - micro
+
+
+
+1. Launch 3 Amazon Linux 3 instances 1. DockerSwarm 2. Worker Node 1 , 3. Worker Node 2
+2. Open MobaXterm and connect to all machines
+3. Go to multi-exec and install docker and start
+   yum install -y docker
+   systemctl start docker
+
+set hostnames for all
+
+hostnamectl set-hostname manager  --> In manager node
+sudo -i
+hostnamectl set-hostname worker1
+sudo -i
+hostnamectl set-hostname worker2
+sudo -i
+
+In Manager Node
+
+docker swarm init
+
+IN worker node1
+
+docker swarm join --token SWMTKN-1-52jo6saicq2fg67gicpy2t77t1xjhaeqb41520jfux4y77rib7-ah49urfxgvcgmdg09yehhkbbd 172.31.21.171:2377
+
+In Worker Node2
+
+docker swarm join --token SWMTKN-1-52jo6saicq2fg67gicpy2t77t1xjhaeqb41520jfux4y77rib7-ah49urfxgvcgmdg09yehhkbbd 172.31.21.171:2377
+
+In Manager node
+
+docker node ls
+
+--> install Jenkins on master node
+vi Jenkins.sh
+copy paste the script
+
+sh Jenkins.sh -- selection 2
+
+--> if doesn't work see if Jenkins containers is already there as we did docker swarm -- for that docker service rm Jenkins
+
+http://IP:8080 and ready Jenkins
+
+Run the below command to work docker in Jenkins pipeline otherwise pipeline will not work
+-----------------------
+
+RUn in docker host - manager
+
+chmod 777 /var/run/docker.sock
+systemctl daemon-reload
+systemctl restart docker.service
+
+
+Now lets create a pipeline in Jenkins
+-------------------------------------
+
+Get code from GitHub --> as dockerfile exits in the repo, we can build using pipeline
+But we dont have only 1 image, we need to create multiple images like internetbanking, Mobilebanking, loan and insurance
+For this, lets have image as a variable not a direct entry in pipeline as docker build -t internetbanking:v1 , instead use docker build -t $image
+
+create image as a parameter
+
+In Pipeline select : This project is parameterized --> Add Parameter --> choice parameter
+Name:  image
+choices :
+internetbanking:v1
+mobilebanking:v1
+insurance:v1
+loans:v1
+
+
+pipeline {
+    agent any
+   
+    stages {
+        stage('checkout') {
+            steps {
+                git ' https://github.com/ReyazShaik/dockerproject.git&#39;
+            }
+        }
+        stage('build') {
+            steps {
+                sh 'docker build -t $image .'
+            }
+        }
+     }
+}
+
+
+
+Run the Pipeline
+
+in Docker host / manager , see image got created
+
+docker images --> you should see internetbanking:v1 image
+
+----
+Now lets tag
+----
+
+As we need to create multiple repo and images, we need to create a parameter for repo , go up in same pipeline --> Add parameters
+
+Name: repo  -- keep always small letters because in pipeline also $repo
+choices :
+trainerreyaz/ib-image
+trainerreyaz/mb-image
+trainerreyaz/insurance-image
+trainerreyaz/loans-image
+
+
+IN pipeline add
+
+ stage('tagging') {
+            steps {
+                sh 'docker tag $image $repo'
+            }
+        }
+
+
+
+Now in docker host --> docker images -> you can see now new image with new tag
+
+Now images are stored locally , now push to dockerhub , for this we need to authenticate to dockerhub
+
+In Jenkins, we have local and global variables
+
+Manage Jenkins --> System --> Environment variables
+Name: password
+value: give here dockerhub password
+
+
+        stage('push') {
+            steps {
+                sh 'docker login -u trainerreyaz -p $password'
+                sh 'docker push $repo'
+            }
+        }
+
+Now build the pipeline with internetbanking --> image will be stored in dockerhub --> login to dockerhub and show the image
+
+Now, change index.html in GitHub from InternetBanking to MobileBanking --> Build Pipeline --> MobileBanking --> trainerreyaz/mb-image
+Now, change index.html in GitHub from MobileBanking to Insurance --> Build Pipeline --> Insurance --> trainerreyaz/insurance-image
+Now, change index.html in GitHub from Insurance to Loans --> Build Pipeline --> Loans --> trainerreyaz/Loans-image
+
+Now a new repos and image will be created in dockerhub
+
+Note: In realtime we dont use webhook because if developer push automatically pipeline will run which is danger
+
+Till now we created images lets now do deployment
+
+=== NOw Deployment ===
+
+Lets use docker swarm to have HA , for this we need containers, lets use dockercompose
+And docker compose is use to create multiple containers but in single host but we need containers in all hosts(workernodes)
+Lets use docker stack
+
+show docker-compose.yml in GitHub
+
+version: '3.8'
+services:
+  internetbanking:
+    image: trainerreyaz/ib-image:latest
+    ports:
+      - "81:80"
+    deploy:
+      replicas: 3
+    volumes:
+      - /var/lib/internetbanking
+  mobilebanking:
+    image: trainerreyaz/mb-image:latest
+    ports:
+      - "82:80"
+    deploy:
+      replicas: 3
+    volumes:
+      - /var/lib/mobilebanking
+  insurance:
+    image: trainerreyaz/insurance-image:latest
+    ports:
+      - "83:80"
+    deploy:
+      replicas: 3
+    volumes:
+      - /var/lib/insurance
+  loan:
+    image: trainerreyaz/loans-image:latest
+    ports:
+      - "84:80"
+    deploy:
+      replicas: 3
+    volumes:
+      - /var/lib/loan
+
+
+
+And add this below to pipeline , and bank is application name
+
+ stage('deploy') {
+            steps {
+                sh 'docker stack deploy -c docker-compose.yml bank'
+            }
+        }
+
+-C - compose file
+
+Now build the pipeline with insurance image and insurance repo
+
+Some docker stack commands
+=====================
+
+docker stack ls
+docker stack services bank
+
+
+docker service ls
+docker service rm stackname
+docker stack ls
+docker stack ps bank
+
+
+pipeline {
+    agent any
+   
+    stages {
+        stage('checkout') {
+            steps {
+                git ' https://github.com/ReyazShaik/dockerproject.git&#39;
+            }
+        }
+        stage('build') {
+            steps {
+                sh 'docker build -t $image .'
+            }
+        }
+        stage('tag') {
+            steps {
+                sh 'docker tag $image $repo'
+            }
+        }
+        stage('push') {
+            steps {
+                sh 'docker login -u trainerreyaz -p $password'
+                sh 'docker push $repo'
+            }
+        }
+        stage('deploy') {
+            steps {
+                sh 'docker stack deploy bank -c docker-compose.yml'
+            }
+        }
+    }
+}
+
+
+
+PORTAINER - GUI for managing containers
+=======================================
+
+
+Portainer Using SWARM
+===========
+
+Must have swarm mode and all ports enable with docker engine
+
+In Manager Node
+----------------
+
+docker swarm init
+
+IN worker node1
+----------------
+
+docker swarm join --token SWMTKN-1-52jo6saicq2fg67gicpy2t77t1xjhaeqb41520jfux4y77rib7-ah49urfxgvcgmdg09yehhkbbd 172.31.21.171:2377
+
+In Worker Node2
+---------------
+
+docker swarm join --token SWMTKN-1-52jo6saicq2fg67gicpy2t77t1xjhaeqb41520jfux4y77rib7-ah49urfxgvcgmdg09yehhkbbd 172.31.21.171:2377
+
+In Manager node
+---------------
+
+docker node ls
+
+
+Download portainer yaml
+----------------------
+
+curl -L  https://downloads.portainer.io/ce2-16/portainer-agent-stack.yml -o portainer-agent-stack.yml
+
+docker stack deploy -c portainer-agent-stack.yml portainer
+
+docker ps
+
+public-ip of swarm master:9443
+
+https://13.233.198.125:9443
+http://13.233.198.125:9000
+
+Environment --> Primary
+
+
+Portainer on Standalone docker
+-------------------------------
+
+
+
+docker volume create portainer_data
+
+docker run -d -p 8000:8000 -p 9443:9443 --name portainer \
+--restart=always \
+-v /var/run/docker.sock:/var/run/docker.sock \
+-v portainer_data:/data \
+portainer/portainer-ce:2.9.3
+
+docker ps
+
+https://localhost:9443   [use https forcely in browser]
+
+Following command to start a Portainer Agent container on the system you want to add:
+
+docker run -d -p 9001:9001 --name portainer_agent --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v /var/lib/docker/volumes:/var/lib/docker/volumes portainer/agent:2.9.3
+
+
+Add environment --> Name = Docker, Environment URL = EC2 instance Public IP:9001
+
+Local --> Add container --> Name = Apache --> image= httpd,  publish a new network port --> host=8080, container =80 --> deploy
+
+
+explore application
+
+
+
+
+
+
+TO setup MySQL
+==============
+
+docker run -d --name mysql-db \
+  -e MYSQL_ROOT_PASSWORD=my-secret-pw \
+  -e MYSQL_DATABASE=mydb \
+  -e MYSQL_USER=myuser \
+  -e MYSQL_PASSWORD=mypassword \
+  -p 3306:3306 \
+  -v mysql_data:/var/lib/mysql \
+  --restart unless-stopped \
+  mysql:latest
+
+
+docker ps
+
+
+docker logs mysql-db
+
+docker exec -it mysql-db mysql -u root -p
+
+pwd= my-secret-pw
+
+
+create database test123;
+show databases;
+drop databases test123;
+
+
+docker stop mysql-db
+docker rm mysql-db
+docker volume rm mysql_data
+

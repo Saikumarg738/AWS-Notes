@@ -1,0 +1,50 @@
+	• Prometheus runs as a POD inside cluster in a different namespace
+	• It is deployed as Deployment or stateful set
+	
+Prometheus extracting metrics
+
+	• Node Metric
+	
+	Prometheus pulls metrics using Node Exporter, Node Exporter runs as a DaemonSet ( 1 POD per node )
+	node-exporter:9100/metrics
+	
+	• Application Metrics
+
+	Metrics are exposed at /metrics HTTP endpoint
+	
+Creating volumes for Prometheus and Grafana
+
+We have to associate OIDC
+
+eksctl utils associate-iam-oidc-provider \
+  --cluster sai-cluster \
+  --region us-east-1 \
+  --approve
+
+eksctl update addon \
+  --name aws-ebs-csi-driver \
+  --cluster sai-cluster \
+  --region us-east-1 \
+  --force
+
+
+
+Prometheus scrapes data from Node exporter agent
+
+Node exporter runs on port 9100 and the URL is mentioned in prometheus.yml file
+
+Target : [host:9100/metrics ]
+
+The IPs should be present in /etc/hosts
+
+
+
+Prometheus : 9090
+Node Exporter : 9100
+Grafana : 3000
+
+
+
+
+	
+	

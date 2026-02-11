@@ -1,0 +1,45 @@
+Multistage Docker
+
+In this you write building components in one stage and copy only the required components to stage like executable
+
+Stage 1 : Install all dependecies, build tools and create artifact like executable JAR file
+
+Stage : Use slim image and copy only the *jar file and run
+
+
+
+FROM mavin:3.9 as Builder
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency
+COPY . .
+RUN mvn package
+
+FROM mvn:slim
+WORKDIR /app
+COPY --from=BUILDER /app/target/*jar *jar
+CMD ["java","-jar","app.jar"]
+
+
+No Cache
+
+--no-cache is way to specify not to use old cache layer from previous build. This is primarily used to that Docker used new version for build
+
+
+Docker Security
+
+1. Dockerize a production web app with env variables. 
+2. Build optimized multi-stage Dockerfiles. 
+3. Run containers as non-root for security. 
+4. Push versioned images to Docker Hub or ECR. 
+5. Deploy multi-service stacks using docker-compose. 6. Manage persistent data with Docker volumes. 
+7. Add healthchecks to containers. 
+8. Scan and fix image vulnerabilities. 
+9. Automate builds and pushes in CI. 
+10. Debug containers using logs and exec.
+
+
+
+
+
+

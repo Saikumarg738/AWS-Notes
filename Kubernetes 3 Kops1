@@ -1,0 +1,499 @@
+=======================================================
+                          KOPS Setup
+========================================================
+
+Launch Amazon Linux 2 EC2 instance with t2.micro
+
+Make sure AWS CLI is installed. Attach a IAM Role with Admin permissions
+
+Install kubectl and kops
+=======================
+
+curl -LO "https://dl.k8s.io/release/$(curl -L -s  https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+Latet version
+
+curl -LO https://github.com/kubernetes/kops/releases/download/v1.30.3/kops-linux-amd64
+
+wget  https://github.com/kubernetes/kops/releases/download/v1.25.0/kops-linux-amd64
+chmod +x kops-linux-amd64 kubectl
+mv kubectl /usr/local/bin/kubectl
+mv kops-linux-amd64 /usr/local/bin/kops
+
+copy paste all at a time if required
+
+vi .bashrc
+
+export PATH=$PATH:/usr/local/bin/
+
+wq!
+
+appends /usr/local/bin/ to the system's $PATH environment variable, allowing you to execute binaries located in /usr/local/bin/ from anywhere in the terminal without specifying the full path.
+
+--- source .bashrc
+
+in ubuntu no need to do above steps, but for amazon Linux yes
+
+Creating bucket TO STORE CLUSTER INFO
+=====================================
+
+Storing cluster info in s3 bucket because just in case if we loose K8S cluster we can get from S3
+Either you can create a bucket manually using console or run below commands
+
+--> aws s3api create-bucket --bucket reyaz-kops-testbkt1234.k8s.local --region ap-south-1 --create-bucket-configuration LocationConstraint=ap-south-1
+
+--> aws s3api put-bucket-versioning --bucket reyaz-kops-testbkt1234.k8s.local --region ap-south-1 --versioning-configuration Status=Enabled
+
+--> export KOPS_STATE_STORE=s3://reyaz-kops-testbkt1234.k8s.local
+
+--> kops create cluster --name reyaz.k8s.local --zones ap-south-1a --master-count=1 --master-size t2.medium --node-count=2 --node-size t2.micro
+
+--> kops update cluster --name reyaz.k8s.local --yes --admin
+
+kops update cluster → Updates the Kubernetes cluster configuration.
+--name reyaz.k8s.local → Specifies the cluster name (replace with your actual cluster name).
+--yes → Applies the changes automatically (without requiring manual confirmation).
+--admin → Grants the current user admin privileges in the cluster.
+
+
+--> kops validate cluster --wait 10m
+
+This command checks if your Kubernetes cluster is fully functional and waits up to 10 minutes for all nodes and components to become ready.
+
+
+For Future Reference
+
+Suggestions:
+ * list clusters with: kops get cluster
+ * edit this cluster with: kops edit cluster reyaz.k8s.local
+ * edit your node instance group: kops edit ig --name=reyaz.k8s.local nodes-ap-south-1a
+ * edit your master instance group: kops edit ig --name=reyaz.k8s.local master-ap-south-1a
+
+
+See in AWS Console, EC2 instances are launched with ASG and load balancer
+
+By default KOPS will create CLB. If you want KOPS to create ALB
+
+kops edit cluster --name reyaz.k8s.local    [change classic to Network]
+
+spec:
+  api:
+    loadBalancer:
+      class: Classic
+      type: Public
+
+
+Note: just try to delete now worker node or master node, ASG will create it immediately
+
+-- kops get cluster
+
+-- kubectl get nodes/no
+
+-- kubectl get nodes -o wide
+
+
+vi deployment.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/ib-image:latest
+
+-- kubectl create -f deployment.yml
+
+-- kubectl get pods
+
+-- kubectl get nodes -o wide
+
+Manager node will not host pods himself, K8S will create pods only in worker nodes
+
+-- kubectl get pods -o wide   [see the nodes, pods spread across nodes equally]
+
+Example: if you want 4 pods , edit yml file and update replicas to 4
+
+-- kubectl apply -f deployment.yml
+
+-- kubectl get no -o wide
+
+===========================
+Few Cluster Admin Activities
+==========================
+
+Currently we have now only 1 master nodes and 2 worker nodes
+
+KOPS commands are used for cluster activities.
+KUBECTL commands are used for resource activities.
+
+annotations
+----------
+ig =  instance group
+
+WorkerNodes = nodes-ap-south-1a
+
+Scale Out Worker Nodes
+----------------------
+
+-- kops edit ig --name=reyaz.k8s.local nodes-ap-south-1a
+           --> max size = 4, min size = 4
+
+-- kops update cluster --name reyaz.k8s.local --yes --admin
+
+-- kops rolling-update cluster --yes
+
+See in AWS Console , 2 additional worker nodes got created
+
+-- kubectl get nodes   [takes time to show]
+
+Scale out Master Nodes
+----------------------
+
+-- kops edit ig --name=reyaz.k8s.local master-ap-south-1a
+           --> max size = 2, min size = 2
+
+-- kops update cluster --name reyaz.k8s.local --yes --admin
+
+-- kops rolling-update cluster --yes
+
+See in AWS Console , 1 additional Master nodes got created
+
+-- kubectl get nodes  [takes time to show]
+
+*************************************************************************
+IF ERROR
+=======
+🔹 Step 3: If Kubelet is Installed but Not Found in Systemd
+If kubelet is installed but still not found in systemd, try reloading systemd:
+
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+
+If the issue persists, manually add the systemd service file:
+
+sudo nano /etc/systemd/system/kubelet.service
+
+[Service]
+ExecStart=/usr/bin/kubelet
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+Then reload and start:
+
+sudo systemctl daemon-reload
+sudo systemctl enable kubelet
+sudo systemctl restart kubelet
+
+🔹 Step 4: Check Logs for Errors
+If kubelet is still failing, check logs:
+
+sudo journalctl -u kubelet -f
+
+
+*******************************************************
+
+
+
+
+
+
+
+
+
+Example: Lets do a new deployment again
+--------------------------------------
+
+Before that clean up
+
+-- kubectl get deployments
+
+-- kubectl delete deploy ib-deployment
+
+-- kubectl get pods
+
+vi deploynew.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/mb-image:latest
+
+-- kubectl create -f deploynew.yml
+
+-- kubectl get po -o wide   [Now all pods are spread across 4 worker nodes]
+
+If you want to scale out pods
+-------------------------
+
+-- kubectl scale deploy/mb-deployment --replicas=10
+
+-- kubectl get pods -o wide
+
+If you want to scale in pods
+-------------------------
+
+-- kubectl scale deploy/mb-deployment --replicas=4
+
+-- kubectl get pods -o wide
+
+kops delete cluster --name reyaz.k8s.local --yes
+
+============================================================================================================================================
+ 
+
+
+===============
+NAMESPACES
+===============
+
+Generally we cannot create multiple Cluster for each team(expensive), instead we create a NameSpaces in one Cluster for each team
+
+Namespaces will not talk to each other, its an isolated space in one Cluster
+
+Each namespaces can see their own pods
+
+TYPES:
+
+default            : This is default namespace, all objects are created here
+kube-node-release    : It will store the object which is taken from one namespace to another
+kube-public        : All Public objects are stored here, generally namespace are private, if you want common public namespace
+kube-system        : By default K8S will create some object, those are stored here
+
+
+Note: Every component of kubernetes cluster is going to create in the form of POD, All these PODS are stored in Kube-System Namespace
+
+-- kubectl get namespace/ns
+
+-- kubectl get pods
+
+-- kubectl describe pod   [ By default pods are created in default namespace]
+
+
+-- kubectl get pods -A  [This will list all pods from all namespaces]
+
+-- kubectl get pods --all-namespaces  [This can also be used to get all pods from all namespaces]
+
+-- kubectl get pods -n default [This will list pods wchich is in default namespace]
+
+-- kubectl get pods -n kube-node-release  -- no pods here
+
+-- kubectl get pods -n kube-public  -- no pods here
+
+-- kubectl get pods -n kube-system  [all kubeproxy, apiserver, controller, schedular pods are here]
+
+
+Lets create a pods in namespaces
+--------------------------------
+
+-- kubectl get ns
+
+-- kubectl create ns dev
+
+-- kubectl get ns
+
+Currently I am in default namespace, how to check
+
+-- kubectl config view   [ output doesn't show namespace,  if you don't see any namespace, this is default]
+
+-- kubectl config set-context --current --namespace=dev  [This is use to switch to move from another namespace]
+
+-- kubectl config view  [ Now this output show dev namespace ]
+
+-- kubectl get pods  [Now you are in dev namespace, now you cannot see any pods of other namespace]
+
+== create a new pods in this namespace
+
+-- kubectl run dev1 --image nginx
+-- kubectl run dev2 --image nginx
+-- kubectl run dev3 --image nginx
+
+-- kubectl get pods
+
+=== lets create few pods in PROD namespace
+------------------------------------------
+
+kubectl get ns
+
+kubectl create ns prod
+
+kubectl get ns
+
+kubectl config view  -- see the output, we are in dev
+
+kubectl config set-context --current --namespace=prod   --- now change the namespace to prod
+
+kubectl config view
+
+kubectl get po
+
+you are in prod namespace , but if you want to see from another namespace
+
+kubectl run prod1 --image nginx
+kubectl run prod2 --image nginx
+kubectl run prod3 --image nginx
+
+kubectl get po
+
+kubectl get po -n default
+kubectl get po -n dev
+kubectl get po -n prod
+
+kubectl delete pod dev1 -n dev   [Deleting the  pod dev2 in dev namespace]
+
+kubectl delete pod prod1 -n prod   [Deleting the  pod prod1 in prod namespace]
+
+kubectl delete pod --all : [To delete all pods in the namespace]
+
+If require: kubectl delete namespace <namespace-name>
+
+
+===============================
+Role-Based Access Control (RBAC)
+===============================
+
+Role-Based Access Control (RBAC) in Kubernetes is a method for regulating access to resources in a Kubernetes cluster based on the roles of individual users or service accounts.
+
+RBAC helps you define what actions (verbs like get, list, create, delete, etc.) can be performed on specific resources (like pods, services, deployments, etc.) within specific namespaces or across the cluster.
+
+Role: A set of permissions (rules) that are defined within a namespace. Roles are used to grant access to resources within a specific namespace.
+
+RoleBinding: Grants the permissions defined in a Role to a user or service account within a specific namespace.
+
+Authentication(who are you?) and Authorization (what can you do?)
+
+Users vs Service Accounts
+==========================
+Before setting up RBAC, it’s important to understand the Kubernetes user model. There are two ways to create “users” depending on the type of access that’s required:
+
+Users —
+------
+In Kubernetes, a User represents a human who authenticates to the cluster using an external service. You can use private keys (the default method), a list of usernames and passwords, or an OAuth service such as Google Accounts. Users are not managed by Kubernetes; there is no API object for them so you can’t create them using Kubectl. You must make changes at the external service provider.
+
+Service Accounts —
+-------------------
+Service Accounts are token values that can be used to grant access to namespaces in your cluster. They’re designed for use by applications and system components. Unlike Users, Service Accounts are backed by Kubernetes objects and can be managed using the API.
+
+
+
+Assume authentication has been done on the kubernetes cluster by company with user jack, Let use give permissions to him to cluster only to get, list and watch
+
+Create a namespace in kubernetes
+
+-- kubectl create ns dev [use if already exits]
+
+-- kubectl config set-context --current --namespace=dev
+
+First create a sample serviceaccount here in kubernetes called jack
+
+Create a Serviceaccount ---> Create a ROLE(give permissions) --->  Role Binding
+
+vi serviceaccount.yml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jack
+  namespace: dev
+
+-- kubectl create -f serviceaccount.yml
+
+--------------------------------------------------------------
+
+Create a Role within the dev namespace that allows the user jack to perform certain actions on pods:
+
+vi role.yml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: dev
+  name: dev-pod-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+
+-- kubectl create -f role.yml
+
+Since pods belong to the core API group, we use apiGroups: [""]
+
+
+------------------------------------------------------------------
+
+Next, bind the pod-reader Role to a user or service account. For simplicity, we'll bind it to a service account named jack:
+
+This RoleBinding binds the pod-reader Role to the jack user, allowing that user to get, list, and watch pods in the dev namespace.
+
+vi rolebinding.yml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods
+  namespace: dev
+subjects:
+- kind: User
+  name: jack
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: dev-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+
+-- kubectl create -f rolebinding.yml
+
+
+Verifying Access
+-----------------
+To verify that the jack user has the correct permissions, you can impersonate the user using kubectl:
+
+-- kubectl auth can-i list pods --namespace=dev --as=jack   [answer yes]
+
+-- kubectl auth can-i create pods --namespace=dev --as=jack  [answer no]
+
+
+-- kubectl get roles -n dev    [List all roles in a namespace:
+
+
+-- kubectl describe rolebinding read-pods -n dev
+
+For more depth
+-----------------
+https://spacelift.io/blog/kubernetes-rbac
+
+Aws eks update-kubeconfig --region <region> --name <cluster name>
+
+

@@ -1,0 +1,409 @@
+PODS SCHEDULING
+===============
+
+In Kubernetes, Node Selector,Node Affinity,  Taints and Tolerations and are mechanisms that influence how Pods are scheduled onto Nodes within a cluster.
+
+Node Selector
+Node Affinity
+Taints and Tolerations
+
+1. Node Selector
+------------------
+NodeSelector is the simplest form of node selection constraint, allowing Pods to be scheduled only on Nodes with specific labels. By specifying a NodeSelector in a Pod's specification, you can ensure that the Pod runs only on Nodes that match the given label criteria.
+NodeSelector: Use when you have simple, specific constraints for Pod placement based on Node labels
+
+In the below manifest file, we are creating 2 pods and those pods should be scheduled in ib-node labeled node.
+
+vi nodeselector.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      nodeSelector:
+        node-name: ib-node
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+
+
+-- kubectl apply -f nodeselector.yml
+
+-- kubectl get pods   --- Pods are not getting created because there is no label to the node called node-name: ib-node
+
+-- kubectl describe pod ib-deployment-7784c9bfb5-8sl8d  
+
+     Warning  FailedScheduling  2m40s  default-scheduler  0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 2 node(s) didn't match Pod's node affinity/selector. preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.
+
+-- kubectl get nodes
+
+-- kubectl edit node i-043783332483bf9f8
+
+      under labels add  --- node-name: ib-node / We can use command also "kubectl label nodes i-043783332483bf9f8 node-name=ib-node "
+
+
+-- kubectl get pods  -- Now pods are running
+
+we are forcing kube-schedular to schedule pod on particular node. Its hard match. If it doesn't match, Kube scheduler will not schedule the pod
+so pod will be in pending state    
+
+-- kubectl delete deploy ib-deployment
+
+2: Node Affinity
+================
+Node Affinity is a more expressive way to specify rules about the placement of pods relative to nodes' labels. It allows you to specify rules that apply only if certain conditions are met. Same as Node Selector but this has flexible way, if matches do it, if not schedule pod on any another node.
+
+Two types
+----------
+1.Preferred during scheduling Ignore during execution (soft rules) : good if happen
+2.Required during scheduling Ignore during execution (hard rules) : Must happen  : Same as NodeSelector
+
+The node affinity syntax supports the following operators: In, NotIn, Exists, DoesNotExist, Gt, Lt, etc.
+
+
+Preferred:
+---------
+
+vi preferred.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      affinity:
+       nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+           matchExpressions:
+           - key: node-name
+             operator: In
+             values:
+             - mb-node
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+
+
+weight: 1: Indicates the preference weight. Higher values signify stronger preferences.​
+
+
+
+we haven't set the label for another node as node-name: mb-node
+
+-- kubectl apply -f preferred.yml
+
+-- kubectl get pods  --> 1 pod running. Why ? even i mention node-name: mb-node, No node has this label yet, but as we used preferred configuration, scheduler has scheduled on other nodes.
+
+-- kubectl get pods -o wide   --> note down node-id , it might show on same node, but scheduler has choosen
+
+-- kubectl delete deploy ib-deployment
+
+-- vi preffered.yml
+
+   change node-name: ib-node
+
+-- kubectl apply -f preferred.yml
+
+-- kubectl get pods -o wide  --- it should schedule on actual labeled node
+
+-- kubectl delete -f preferred.yml
+
+Required
+========
+
+vi required.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      affinity:
+       nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+         nodeSelectorTerms:
+         - matchExpressions:
+           - key: node-name
+             operator: In
+             values:
+             - mb-node
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+
+-- kubectl create -f required.yml
+
+-- kubectl get pods -o wide   [Pod are not running, it is in pending state because, required is mb-node, but no node has mb-node]
+
+-- kubectl delete -f required.yml
+
+TAINTS and TOLERANCE
+====================
+
+In Kubernetes, taints and tolerations work together to control the scheduling of Pods onto Nodes. Taints are applied to Nodes to prevent certain Pods from being scheduled on them, while tolerations are applied to Pods to allow them to be scheduled on Nodes with matching taints. ​
+
+Example Scenario: Dedicated Nodes for Specific Workloads
+---------------------------------------------------------
+Suppose you have a Kubernetes cluster with Nodes equipped with specialized hardware, such as GPUs, intended exclusively for machine learning workloads. To ensure that only Pods requiring GPU resources are scheduled on these Nodes, you can use taints and tolerations.
+
+
+-- kubectl edit node i-0e6b67bf1b00383be  [Edit control plane, this master node has taint no schedule, thats the reason master node will not have pods ]
+
+Apply a Taint to GPU Nodes
+--------------------------
+
+First, taint the GPU Nodes to repel/force Pods that do not require GPU resources:
+
+-- kubectl get nodes
+
+-- kubectl taint nodes i-0333b24c25bf4868b hardware=gpu:NoSchedule
+
+This command adds a taint with key hardware, value gpu, and effect NoSchedule to the specified Node. As a result, Pods without a matching toleration will not be scheduled on this Node.
+
+
+Lets test:
+-------
+
+vi deploy.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: reyadocker/internetbankingrepo:latest
+
+
+-- kubectl create -f deploy.yml
+
+-- kubectl get pods -o wide  [all pods are scheudled on another node]
+
+Add a Toleration to GPU-Requiring Pods
+--------------------------------------
+
+Next, add a toleration to the Pods that require GPU resources, allowing them to be scheduled on the tainted Nodes:
+
+vi deploy.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: reyadocker/internetbankingrepo:latest
+      tolerations:
+        - key: "hardware"
+          operator: "Equal"
+          value: "gpu"
+          effect: "NoSchedule"
+
+
+In this Pod specification, the toleration matches the taint applied to the GPU Nodes, permitting the Pod to be scheduled on those Nodes.
+
+
+Key Points:
+----------
+Taints are applied to Nodes to repel certain Pods. They consist of a key, value, and effect (NoSchedule, PreferNoSchedule, or NoExecute). ​
+
+Tolerations are applied to Pods to allow them to be scheduled on Nodes with matching taints. They must match the key, value, and effect of the taint to be effective.
+
+
+Pod Affinity
+=============
+Pod affinity allows users to specify which pods a pod should or should not be scheduled with based on labels. For example, you can use pod affinity to specify that a pod should be scheduled on the same node as other pods with a specific label, such as app=database.
+
+SUMMARY
+=======
+
+Taint should be used when you want to mark a node as unavailable for certain pods. For example, you can use taint to mark a node as "maintenance" and prevent pods from being scheduled on the node while it is undergoing maintenance.
+
+Node selector is a simpler and more primitive mechanism compared to node affinity and is sufficient for many use cases.
+
+Node affinity should be used when you want to specify which nodes a pod should or should not be scheduled on based on node labels. Node affinity provides more fine-grained control over pod scheduling compared to node selector and allows you to specify complex rules for pod scheduling based on multiple node labels.
+
+Pod affinity allows us to set priorities for which nodes to place our pods based off the attributes of other pods running on those nodes. This works well for grouping pods together in the same node.
+
+Pod anti-affinity allows us to accomplish the opposite, ensuring certain pods don’t run on the same node as other pods. We are going to use this to make sure our pods that run the same application are spread among multiple nodes. To do this, we will tell the scheduler to not place a pod with a particular label onto a node that contains a pod with the same label
+
+
+https://blog.devops.dev/taints-and-tollerations-vs-node-affinity-42ec5305e11a
+
+
+
+==================================================================================================================
+
+HELM:
+
+In K8S Helm is a package manager to install packages
+in Redhat: yum & Ubuntu: apt & K8s: helm
+
+it is used to install applications on clusters.
+we can install and deploy applications by using helm
+it manages k8s resources packages through charts
+chart is a collection of files organized on a directory structure.
+chart is collection of manifest files.
+a running instance of a chart with a specific config is called a release.
+The Helm client and library is written in the Go programming language.
+The library uses the Kubernetes client library to communicate with Kubernetes.
+
+
+ARCHITECURE:
+1. HEML REPOSITORY: IT HAS AL HELM REPOS WHICH IS PUBLICALLY AVAILABLE
+2. HEML CLIENT: DOWNLOADS HELM CHARTS FORM HELM REPOS.
+3. API SERVER: DOWNLOADED HELM CHARTS WILL BE EXECUTED ON CLUSTER WITH API SERVER.
+
+===========
+ARGOCD - to do deployment in K8S Cluster
+=========
+
+GitOps continuous delivery tool for Kubernetes
+
+It automates the deployment of applications to Kubernetes clusters,
+
+Pipeline is not the best method for K8s, use ARGOCD
+
+
+
+
+INTRO:
+ArgoCD is a declarative continuous delivery tool for Kubernetes. ArgoCD is the core component of Argo Project.
+It helps to automate the deployment and management of applications in a K8s cluster. It uses GitOps methodology to manage the application lifecycle and provides a simple and intuitive UI to monitor the application state, rollout changes, and rollbacks.
+With ArgoCD, you can define the desired state of your Kubernetes applications as YAML manifests and version control them in a Git repository.
+ArgoCD will continuously monitor the Git repository for changes and automatically apply them to the Kubernetes cluster.
+ArgoCD also provides advanced features like application health monitoring, automated drift detection, and support for multiple environments such as production, staging, and development.
+It is a popular tool among DevOps teams who want to streamline their Kubernetes application deployment process and ensure consistency and reliability in their infrastructure.
+
+
+Setup KOPS first and with the helm we will setup ARGOCD
+
+Setup KOPS
+
+Install HELM
+---------------
+curl -fsSL -o get_helm.sh  https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+chmod 700 get_helm.sh
+./get_helm.sh
+helm version
+
+Install ARGOCD using HELM
+---------------------------
+helm repo add argo  https://argoproj.github.io/argo-helm
+helm repo update
+
+kubectl create namespace argocd
+helm install argocd argo/argo-cd --namespace argocd
+kubectl get all -n argocd
+
+EXPOSE ARGOCD SERVER:
+--------------------
+kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
+
+yum install jq -y
+
+//export ARGOCD_SERVER='kubectl get svc argocd-server -n argocd -o json | jq --raw-output '.status.loadBalancer.ingress[0].hostname''
+
+//echo $ARGOCD_SERVER
+
+kubectl get svc argocd-server -n argocd -o json | jq --raw-output .status.loadBalancer.ingress[0].hostname
+
+The above command will provide load balancer URL to access ARGO CD
+
+
+TO GET ARGO CD PASSWORD:
+------------------------
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+
+
+
+export ARGO_PWD='kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
+
+echo $ARGO_PWD
+
+The above command to provide password to access argo cd
+
+
+Open ArgoCD load balancer
+
+username: admin and password from above command
+
+create app --> Application Name --> bankapp --> Project Name --> default --> Sync Policy --> Automatic --> Repository -->  https://github.com/ReyazShaik/ar-deploy.git --> Path --> ./ --> CLuster URL --> NameSpace --> default
+
+kubectl get po  --> it created automatically from argocd
+
+kubectl get svc  --> copy paste the elb on browser
+
+now modify replica as 5 in GitHub deploy.yml , automatically argocd will deploy
+
+History and RollBack
+------
+
+Click on history and roll back --> three dots --> rollback
+
+From <https://classroom.google.com/c/NzI3MTQ1MzU3NjIz> 
+

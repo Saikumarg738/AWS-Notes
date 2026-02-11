@@ -1,0 +1,373 @@
+=====================
+DAEMONSET
+======================
+
+✔️ DaemonSets ensure one pod per node for system-level services.
+✔️ Used for monitoring, logging, networking, and security.
+✔️ Automatically adds/removes pods when nodes join/leave the cluster.
+
+
+If you want to deploy only 1 pod per 1 node use DAEMONSET
+it is a old version of Deployment
+
+First delete existing deployment
+
+-- kubectl get deploy
+
+-- kubectl delete deploy mobilebanking-rs
+
+-- kubectl get pods
+
+
+in the below yml , only change is kind: DaemonSet (Capital D and S) and remove Replica
+
+vi daemon.yml
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: mb-daemon
+  labels:
+    app: bank
+spec:
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/mb-image:latest
+
+
+In the above manifest, we didn't mentioned any replicas, but daemonset will create one pod per node for sure.
+
+-- kubectl create -f daemon.yml
+
+-- kubectl get po
+
+
+It shows 2 pods, because DaemonSet will create 1 pod per 1 node, so 2 nodes, 1 pod each
+
+-- kubectl get daemonset
+
+-- kubectl get daemonset --namespace=default  [show daemonset in particular namespace]
+
+-- kubectl delete daemonset <daemonset-name> --namespace=<namespace>
+
+-- kubectl delete daemonset mb-daemon --namespace=default
+
+-- kubectl get daemonset
+
+tip:
+
+-- kubectl delete daemonset --all --namespace=default  [to delete all daemonsets in namespace default]
+
+
+
+
+==========================
+SERVICES - if you want to expose the application
+=========================
+
+Services allow you to expose your applications running on Pods to other components within the cluster or to external users.
+
+Services provide a stable IP address and DNS name for the set of Pods, which might change over time due to scaling or updates
+
+Key Concepts of Kubernetes Services:
+----------------------------------
+
+ClusterIP:
+---------
+
+This is the default type of Service. It exposes the Service on a cluster-internal IP. Other services within the same Kubernetes cluster can access the Service, but it is not accessible from outside the cluster.
+
+This creates a connection using an internal Cluster IP address and a Port.
+
+NodePort:
+---------
+
+This type of Service exposes the Service on each Node’s IP at a static port. A NodePort Service is accessible from outside the cluster by hitting the <NodeIP>:<NodePort>.
+
+When a NodePort is created, kube-proxy exposes a port in the range 30000-32767:
+
+TargetPort:
+-----------
+
+Pod's Container port. Pod's container listens on applicationn port Ex: 80 or 8080, if you dont use this line, K8s will assign default 80 port
+
+
+LoadBalancer:
+-------------
+
+This Service type exposes the Service externally using a cloud provider’s load balancer. It is typically used in cloud environments like AWS, GCP, or Azure.
+
+A LoadBalancer is a Kubernetes service that:
+
+Creates a service like ClusterIP
+Opens a port in every node like NodePort
+Uses a LoadBalancer implementation from your cloud provider (your cloud provider needs to support this for LoadBalancers to work).
+
+
+
+-- kops get cluster
+
+-- kubectl get nodes
+
+-- kubectl get events  [This command is used to see all the cluster events]
+
+-- kubectl get svc   [By default kuberenets will create a default svc ]
+
+Let us create a new service
+
+vi service.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/ib-image:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ib-service
+spec:
+  type: ClusterIP
+  selector:
+    app: bank
+  ports:
+    - port: 80        # Exposes the service on port 80
+      targetPort: 80  #  Pod's container listens on 80, if you dont use this line, K8s will assign default 80 port
+
+
+How Traffic Flows
+-----------------
+Client connects to ib-service:80
+Service forwards request to the Pod’s container at 8080 if 80 (because targetPort: 8080 / 80)
+The container in the Pod listens on 8080 / 80 and processes the request.
+
+targetport = Pod's container
+nodeport = Node's external port
+
+
+-- kubectl create -f service.yml    [To create deployment]
+
+-- kubectl get pods  [To get the list of the pods]
+
+-- kubectl get svc   [Get the list of services created]
+
+-- kubectl get pods -o wide  [Get the pods details ]
+
+-- kubectl describe svc ib-service  [Get the detailed description of service]
+
+===== This has clusterIP service, but  cannot exposed to internet, use this for databases which should be in private
+
+-- kubectl delete -f service.yml    [ This will delete service and deployment ]
+
+
+
+===============
+NodePort
+===============
+
+IT will expose our application in a particular port
+
+Range 30000 - 32767 (in SG, we need to give all traffic)
+
+if we don't specify any port K8s will pick randomly
+
+
+vi service.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/mb-image:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mb-service
+spec:
+  type: NodePort   # Type Nodeport, but if you dont mention port number under ports section, K8s will assign random port
+  selector:
+    app: bank
+  ports:
+    - port: 80
+      targetPort: 80  # Ensure this matches the container's port, if you dont use this line, K8s will assign default 80 port
+
+
+-- kubectl apply -f service.yml  [Can use create to create new resources , update is used to update on existing resources]
+
+-- kubectl describe svc mb-service
+
+-- kubectl get svc  [ See the output, it shows nodeport, port number is random ]
+
+Now http://IP:portnumber  it will not work as K8s will create a new vpc and SG, allow all traffic in new SG(nodes.reyaz.k8s.local)
+    Custom TCP = 31433 , custom=anywhere
+        All traffic , custom = anywhere
+
+==== if you want your own customized port , just edit the before file
+
+vi service.yml
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/mobilebankingrepo:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mb-service
+spec:
+  type: NodePort
+  selector:
+    app: bank
+  ports:
+    - port: 80
+      targetPort: 80  # Ensure this matches the container's port, if you dont use this line, K8s will assign default 80 port
+      nodePort: 31433  # External access via <NodeIP>:31234 Must be in range 30000-32767
+
+
+Client accesses http://<NodeIP>:31234
+Traffic reaches Kubernetes Node on nodePort: 31234
+The service forwards it to port: 80 (internal Service port)
+Then it forwards the request to targetPort: 80 (inside the Pod’s container)
+
+
+-- kubectl apply -f service.yml   [ we can update existing deployment ]
+
+create vs apply : create will create new resources, apply for updating existing resources
+
+-- kubectl describe svc mb-service
+
+-- kubectl get svc
+
+http://IP:31433
+
+
+Drawback of nodeport : we should not give IP and port number to customer, he is not interested
+----------------
+
+====================================================================
+LoadBalancer - it will expose our app to customer using URL, map in R53
+====================================================================
+
+first delete the deployment
+
+-- kubectl delete -f service.yml
+
+
+vi service.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insurance-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/insurance-image:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mb-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: bank
+  ports:
+    - port: 80
+      targetPort: 80  # Ensure this matches the container's port, if you dont use this line, K8s will assign default 80 port
+      nodePort: 31433 # If you dont mention target and nodeports, K8s will generate random nodeport and target port 80
+
+
+-- kubectl create -f service.yml
+
+-- kubectl describe svc mb-service
+
+-- kubectl get svc  [Grab the elb, and see in AWS Console : ELB, Target Group. Wait for sometime to come InService]
+
+-- kubectl delete -f service.yml [if required]
+
+
+
+kops delete cluster --name reyaz.k8s.local --yes
+
+
+To create a service using command
+
+Kubectl expose deployment name --name=my-app-lb --type=LoadBalancer --port=80 --targetPort=80
+
+To check difference between actual K8 object and YAML file
+
+Kubectl diff -f file.yml
+
+Auto Scaling in K8 is called as HPA ( Horizontal Pod Autoscaler )
+
+We need to have Metric server or Heapter to enable Autoscaling.
+
+
+

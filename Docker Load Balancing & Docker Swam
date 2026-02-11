@@ -1,0 +1,447 @@
+Load Balancing Project with Docker-Compose
+==========================================
+📌 Nginx Load Balancer - Dockerfile Setup
+--------------------------------------
+
+
+                                   --- Container1- backend1
+User --------> NGinx Load Balancer --- Container2- backend2
+                                   --- Container3- backend3
+
+
+This Dockerfile will set up Nginx as a Load Balancer for multiple backend services inside Docker.
+
+Step 1: Create a Dockerfile
+Step 2: Create nginx.conf locally and copy to containers through docker-compose
+Step 3: Create docker-compose file to create containers in one shot
+
+1️⃣ Create the Dockerfile
+---------------------
+
+vi Dockerfile
+# Use the official Nginx image
+FROM nginx:latest
+
+# Remove default config and copy custom nginx.conf
+RUN rm /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/
+
+# Expose port 80
+EXPOSE 80
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]
+
+
+
+is used to keep Nginx running in the foreground when running inside a Docker container.
+🔹 Why is daemon off; Needed?
+By default, Nginx runs as a background (daemon) process.
+In a Docker container, the main process must stay in the foreground.
+If Nginx runs as a daemon, Docker thinks the container has exited.
+Setting "daemon off;" prevents it from running in the background, keeping the container alive
+
+
+
+2️⃣ Create the Nginx Load Balancer Config (nginx.conf)
+------------------------------------------
+
+vi nginx.conf
+
+# Define the upstream backend servers
+upstream backend {
+    server backend1:5000;
+    server backend2:5001;
+    server backend3:5002;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+3️⃣ Create a docker-compose.yml (Optional)
+-------------------------------------
+
+vi docker-compose.yml
+
+version: '3'
+services:
+  nginx:
+    build: .
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
+
+  backend1:
+    image: ghcr.io/benc-uk/python-demoapp
+    container_name: backend1
+    expose:
+      - "5000"
+
+  backend2:
+    image: ghcr.io/benc-uk/python-demoapp
+    container_name: backend2
+    expose:
+      - "5001"
+
+  backend3:
+    image: ghcr.io/benc-uk/python-demoapp
+    container_name: backend3
+    expose:
+      - "5002"
+
+
+docker-compose up -d
+docker-compose ps
+
+(or)
+
+docker build -t nginx-lb .
+docker run -d -p 80:80 --name nginx-lb nginx-lb
+
+
+✅ Explanation:
+
+Nginx Load Balancer (nginx-lb) forwards traffic to backend1, backend2, and backend3.
+Each backend service listens on different ports.
+
+================================================================
+📌 Docker Load Balancing with Python Application using Nginx
+===============================================================
+
+✅ Deploy multiple Python Flask applications as backend services.
+✅ Use Nginx as a load balancer to distribute traffic.
+✅ Use Docker Compose for easy deployment.
+
+
+1️⃣ Create the Python Flask App (app.py)
+==================================
+vi app.py
+
+from flask import Flask
+import socket
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return f"Hello from {socket.gethostname()}!"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+2️⃣ Create requirements.txt
+====================
+
+vi requirements.txt
+flask
+
+3️⃣ Create the Python App Dockerfile
+==============================
+
+vi Dockerfile
+
+# Use Python base image
+FROM python:3.9
+
+# Set working directory
+WORKDIR /app
+
+# Copy and install dependencies
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# Copy the application code
+COPY . .
+
+# Expose the port Flask runs on
+EXPOSE 5000
+
+# Start the Flask app
+CMD ["python", "app.py"]
+
+
+4️⃣ Create Nginx Load Balancer Config (nginx.conf)
+=======================================
+vi nginx.conf
+
+# Define the upstream backend servers
+upstream backend {
+    server backend1:5000;
+    server backend2:5000;
+    server backend3:5000;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+
+5️⃣ Create docker-compose.yml
+=========================
+
+vi docker-compose.yml
+
+version: '3'
+
+services:
+  nginx:
+    image: nginx:latest
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
+
+  backend1:
+    build: .
+    container_name: backend1
+    expose:
+      - "5000"
+
+  backend2:
+    build: .
+    container_name: backend2
+    expose:
+      - "5000"
+
+  backend3:
+    build: .
+    container_name: backend3
+    expose:
+      - "5000"
+
+
+docker-compose up -d --build
+
+docker ps -a
+
+http://IP
+
+
+
+=======================
+DOCKERHUB
+=======================
+
+
+docker images
+
+instead storing images in local docker host , push to dockerhub
+
+go to docker and signup
+
+[Lets first tag our image]
+
+-- docker tag internetbanking:v1 trainerreyaz/ib-image
+
+-- docker push trainerreyaz/ib-image --> it will fail, no authentication
+
+-- docker login
+
+    username:
+    password:
+
+-- docker push trainerreyaz/ib-image
+
+**** Now see the images in dockerhub
+*** One time docker login is enough
+
+docker tag mobilebanking:v1 trainerreyaz/mb-image
+docker push trainerreyaz/mb-image
+
+docker tag insurance:v1 trainerreyaz/insurance-image
+docker push trainerreyaz/insurance-image
+
+docker tag loans:v1 trainerreyaz/loans-image
+docker push trainerreyaz/loans-image
+
+--- Now all your images are in dockerhub, just delete the images from local docker host and you can get them from dockerhub again
+
+-- docker rmi -f $(docker images -aq)
+
+-- docker pull trainerreyaz/ib-image
+-- docker pull trainerreyaz/mb-image
+-- docker pull trainerreyaz/insurance-image
+-- docker pull trainerreyaz/loans-image
+
+Now pull images from dockerhub
+
+-- docker pull trainerreyaz/ib-image:latest
+
+-- docker run -itd --name cont1 -p 80:80 trainerreyaz/ib-image:latest
+
+
+
+=============
+DOCKER SWARM - High Availability
+=============
+
+Diagram
+
+If container deleted we can re-create manually or using docker-compose, by if the docker host is terminated ?
+
+Docker swarm uses multiple host machines
+
+
+Its an orchestration tool for containers.
+It is cluster used to manage containers.
+Cluster means group of nodes.
+Cluster will have manager/Leader and worker nodes.
+Multiple servers will have same container.
+If we can access container from one server we can access from another server.
+Manager node will distribute containers worker node.
+Worker node will maintain containers.    
+port : 2377
+Worker nodes join
+
+
+SETUP:
+1. CREATE 3 SERVERS AND INSTALL DOCKER
+2. SET HOSTNAMES (hostnamectl set-hostname manager/worker1/worker2)
+3. GO TO MANAGER NODE (docker swarm init) -- > copy token to all nodes
+4. docker node ls
+
+
+Install docker in master, node1 and node2
+
+yum install -y docker
+
+systemctl start docker
+
+
+--> docker swarm init  -- [ In manager node ]
+
+It will generate a token and command, run below command in all worker nodes
+
+In Node1
+--------
+docker swarm join --token SWMTKN-1-5knz8d9ypaqvd6s2sm1mlyy8d9bznuwemwm18dbz5p7jfxplad-b35y8xpsgq2xgza04913lv91z 172.31.27.158:2377
+
+In Node2
+--------
+docker swarm join --token SWMTKN-1-5knz8d9ypaqvd6s2sm1mlyy8d9bznuwemwm18dbz5p7jfxplad-b35y8xpsgq2xgza04913lv91z 172.31.27.158:2377
+
+Now create a container in manager node, it should create in all worker nodes
+
+On Manager
+----------
+
+docker node ls    
+
+-- docker run -itd --name contl -p 81:80 trainerreyaz/ib-image     [use dockerhub image]
+
+But the above command will create a container only in manager as we used just docker command. If we want to have container in all nodes use docker service
+
+
+
+-- docker service create --name internetbanking --replicas 3 -p 81:80 trainerreyaz/ib-image:latest
+
+-- docker ps -a
+
+Now see containers in all worker nodes, go to each workernodes and do ps -a
+
+docker ps -a
+
+Access application on all 3 servers http://IP:81  , http://workernodeip:81
+
+
+-- docker service ls
+
+-- docker service ps internetbanking
+
+-- docker service logs internetbanking
+
+-- docker service inspect internetbanking
+
+-- docker service scale internetbanking=10    --- it will scale out , equally distributed to all worker nodes including manager
+
+-- docker service scale internetbanking=3  -- it will scale down, it uses LIFO,
+
+give example again
+docker service scale internetbanking=15
+docker service scale internetbanking=5
+
+-- docker service rollback internetbanking  --- going back to how many containers was there before
+it will show 15
+again rollback it will show 5
+
+scenario: if we delete the container in worker node docker kill containerid , docker rm containerid and check the http://IP:81 it still work
+because, nodes has self healing , if you do docker ps -a  , you can see a new container created automatically
+
+delete the container again, it will re-create it automatically
+docker stop contids
+docker rm contids
+
+docker ps -a
+
+--> now in manager node delete the service which contain containers
+
+-- docker service ls
+
+-- docker service rm internetbanking
+
+-- docker service ls
+
+if you want to re-create  
+
+docker service create --name loan --replicas 3 -p 82:80 trainerreyaz/loan:latest
+
+docker service ps loan
+
+docker service create --name mobilebanking --replicas 3 -p 83:80 trainerreyaz/mb-image:latest
+
+
+********** No auto-scaling and load balancer in DockerSwarm that why we use Kubernetes
+
+Note: If entire swarm is not working
+docker swarm init --force-new-cluster
+
+===================================================================
+Example:
+
+docker service create --name jenkins --replicas 3 -p 8080:8080 jenkins/jenkins:lts   ---> create a new service called Jenkins and setup Jenkins containers in all nodes
+
+jenkins/jenkins:lts -> username/image:tag
+
+
+=============================================================================================================================================
+
+Cluster Activities
+=================
+
+docker swarm leave  --> this will leave the swarm, do this in worker node
+if you want to join back -> use the same join command to join back to swarm (up arrow or history command) or
+
+docker swarm join-token manager --> this command will generate a token to join
+docker swarm join-token worker --> this command will generate a token for worker nodes to join
+
+docker node ls
+
+docker node rm nodeid --> it will remove the down node
+
+

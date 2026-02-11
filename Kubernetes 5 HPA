@@ -1,0 +1,579 @@
+============================================
+
+Kubernetes Metric Server  - also called Heapster
+
+=============================================
+
+It's a scalable, efficient source for monitoring the overall health and performance of a Kubernetes cluster, providing the data needed for Kubernetes features like Horizontal Pod Autoscaler (HPA) and the Kubernetes Dashboard.
+
+Key Features:
+============
+
+Resource Metrics:
+----------------
+Collects CPU and memory usage metrics from the kubelets and provides aggregated metrics at the node and pod level.
+
+Autoscaling:
+------------
+Enables features like the Horizontal Pod Autoscaler (HPA), which automatically adjusts the number of pods in a deployment based on observed CPU or memory utilization.
+
+Kubernetes Dashboard:
+---------------------
+The Metrics Server provides the resource usage data displayed in the Kubernetes Dashboard.
+
+How Metrics Server Works:
+-------------------------
+
+Kubelets:
+--------
+Each node in a Kubernetes cluster runs a kubelet that periodically collects resource usage statistics from the node and the containers running on it.
+
+Metrics Server:
+-------------
+The Metrics Server collects these metrics from the kubelets and stores them in memory, aggregating them to be accessed by other components (like the HPA).
+
+
+In Short
+========
+
+This metric server in K8S will collect metrics information like cpu, ram etc for all pods and nodes in the cluster
+
+A single deployment that works on most clusters , collect metrics every 15 secs
+
+We can use kubectl top po/no to see the metrics
+
+-- kubectl top po/no   [ Will not work, as we don't have metric server configured ]
+
+Install Metric Server
+---------------------
+
+kubectl apply -f  https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+
+kubectl top pods     [ Wait for 2 mins ]
+
+kubectl top nodes/no
+
+========================
+Auto-Scaling
+========================
+
+HPA - Horizontal Pod Autoscaling - Scales the number of pods based on CPU/memory utilization or custom metrics.
+--------------------------------
+
+VPA  - Vertical Pod Autoscaling - Adjusts the CPU/memory requests/limits of a pod dynamically to improve resource allocation. you'll need to  
+--------------------------------  install the VPA components in your Kubernetes cluster, as it is not included by default.
+                                  Install the VPA Custom Resource Definitions (CRDs) seperately
+
+
+In K8S , a HPA automatically updates a workload resource (such as Deployment or ReplicaSet) based on demand.
+
+Give the value example 70%, if going more than 70% scale out and less than it will do Scale In
+
+Metric server will do the major role here as it will collects metrics , based on the value scale out and scale in happens
+
+Before scale In, process will wait for few mins to scale in to complete the traffic requests
+this is called COOLING PERIOD
+
+In Kubernetes, the cooling period for the Horizontal Pod Autoscaler (HPA) is the amount of time the HPA waits after a scale event before triggering another scale event.
+
+Scaling can be done only for Scalable Objects(Ex RS, Deployment and RC Replication Controller)
+
+Side note:  Replication Controller(RC), A Replication Controller in Kubernetes is an older mechanism used to ensure that a specified number of pod replicas are running at any given time. Now it is replaced with ReplicaSet
+
+vi auto.yml
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/mobilebankingrepo:latest
+
+
+-- kubectl create -f auto.yml
+
+-- kubectl get pods
+
+-- kubectl top pods
+
+Now lets stress the pods
+
+-- kubectl autoscale deployment mb-deployment --cpu-percent=20 --min=1 --max=10
+
+Autoscale deployment called mb-deployment if my cpu is more than 20%, scale out, min 1 , max 10
+
+-- kubectl get hpa    [ This wil show cpu: 1% / 20% , now cpu percent is 1%, it will take time ]
+
+Now lets stress the pod by installing stress inside pod, lets connect to pod using exec and install stress
+
+-- kubectl get pods
+
+-- kubectl exec -it mb-deployment-8585b755c5-c6fb7 -- /bin/bash
+
+         -- apt update
+         -- apt install stress
+         -- stress --cpu 8 --io 4 --vm 2 --vm-bytes 128M --timeout 60s
+         -- exit
+
+--cpu 8: Launches 8 CPU stressors, each consuming 100% CPU by performing continuous computations.​
+--io 4: Initiates 4 I/O stressors, each generating continuous I/O operations to stress the system's disk and filesystem.​
+--vm 2: Starts 2 virtual memory stressors, each allocating and deallocating memory repeatedly to test the system's memory management.​
+--vm-bytes 128M: Specifies that each virtual memory stressor should allocate 128 megabytes of memory.​
+--timeout 60s: Sets the duration of the stress test to 60 seconds, after which all stressors will terminate.
+
+
+
+
+open another terminal to watch the live pods
+
+-- kubectl get po --watch
+
+On main server
+
+-- kubectl top pods
+
+-- kubectl get hpa
+
+-- kubectl get pods
+
+-- kubectl describe hpa mb-deployment     [ This will show scaling activities ]
+
+-- kubectl get events   [ This will also show same things ]
+
+-- kubectl logs mb-deployment-8585b755c5-p2bzv   [ To see logs of the pod ]
+
+After few mins, scale in happens as we dont have load.
+
+-- kubectl delete -f auto.yml
+
+Example using Manifestfile
+--------------------------
+
+First we need to have deployment and then we can autscale on that deployment / deployment name
+
+vi auto.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+
+
+-- kubectl apply -f auto.yml
+
+--------------------------------
+
+vi hpa.yml
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ib-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ib-deployment
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 20
+
+
+scaleTargetRef specifies the target deployment (ib-deployment) for scaling
+
+
+-- kubectl apply -f hpa.yml
+
+Open another tab --> kubectl get pods --watch
+
+-- kubectl get hpa
+
+-- kubectl get pods
+
+-- kubectl exec -it mb-deployment-8585b755c5-c6fb7 -- /bin/bash
+
+         -- apt update
+         -- apt install stress
+         -- stress --cpu 8 --io 4 --vm 2 --vm-bytes 128M --timeout 60s
+         -- exit
+
+-- kubectl get hpa
+
+
+Note: if you want to delete metric server , just instead apply, use delete
+
+kubectl delete -f  https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+
+
+===========================
+Resource Quota
+===========================
+
+
+K8S cluster can be divided into namespaces
+By default the pods in K8s will run with no limitation of Memory and CPU
+WE need to give the limit for the pod
+IT can limit the objects that can be created in a namespace and total amount of resources
+pod schedular in master will check the worker nodes on cpu and memory and create a pod in it
+we can set limits to CPU, Memory and storage
+CPU is measrured on Cores and memory on Bytes
+1CPU = 1000 milliCPUs
+
+Requests = how much we want
+Limit = how much max we want
+
+limits can be given to pod and nodes also
+the default limit is 0
+
+if you mention request and limit everthing will work fine
+if you dont mention request and mention limit then Request = limit
+if you dont mention request dont mention limit , Request ! = limit
+
+Every pod in the namespace must have CPU limit, no need to mention memory, if you dont mention cpu, pod will take all cpu
+The amount of CPU used by all pods inside namespace must not exceed specified limit
+
+-- kubectl create ns dev
+
+-- kubectl config set-context --current --namespace=dev
+
+-- kubectl config view  [To see which namespace we are using]
+
+vi dev-quota.yml
+
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-quota
+  namespace: dev
+spec:
+  hard:
+    pods: "5"
+    limits.cpu: "1"
+    limits.memory: 1Gi
+
+
+Pods: A maximum of 5 pods can be created.​
+CPU Limits: The total CPU limit across all containers is restricted to 1 CPU.​
+Memory Limits: The total memory limit across all containers is capped at 1 GiB.
+
+
+-- kubectl create -f dev-quota.yml
+
+-- kubectl get quota
+
+NAME        AGE   REQUEST     LIMIT
+dev-quota   69s   pods: 0/5   limits.cpu: 0/1, limits.memory: 0/1Gi
+
+
+-- kubectl run pod1 --image=nginx  [ This will not work because, we need to mention quota for dev namespace as we are in that ns
+                                     we can put --cpu and --memory in the command or use manifest file ]
+
+vi deploy.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: reyadocker/internetbankingrepo:latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+
+-- kubectl create -f deploy.yml
+
+-- kubectl get pods  [It has created only 1 pod, as we mention replica = 3 , this is due to restriction we made for this namespace dev]
+
+In the above manifest file, we are mentioning cpu 1 and memory 512 for each pod, but in name space dev we have restricted to 1cpu and 1GB memory, if you run kubectl create -f deploy.yml , it will create only 1 pod because of restriction, if you want all 3 pods put cpu as 0.3 ad 300Mi, it will create all- to do this kubectl delete -f deploy.yml and recreate it
+
+-- kubectl delete -f deploy.yml
+
+
+vi deploy.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: reyadocker/internetbankingrepo:latest
+          resources:
+            limits:
+              cpu: "0.3"
+              memory: 300Mi
+
+
+-- kubectl create -f deploy.yml
+
+-- kubectl get po
+
+-- kubectl get quota
+
+-- kubectl delete -f deploy.yml
+
+========================================================================================================================
+
+======================
+PV - Persistent Volume
+======================
+
+Stateless : if i delete pod data is lost, because data is stored locally on the pod and instance
+----------
+Stateful: if i delete the pod data is persistent, because we can store the data in external storage like AWS EBS
+---------
+
+Kubernetes Persistent Volumes (PVs) provide a way to manage durable storage for applications running in a Kubernetes cluster.
+----------------------------------
+Unlike ephemeral storage tied to the lifecycle of a pod, Persistent Volumes exist independently of pods and remain intact even after pods are deleted.
+
+This makes PVs ideal for stateful applications that require persistent storage, such as databases
+
+
+Persistent meaning permanent
+
+PV are independent they can exists even if no pod is using them
+
+It is created by administrator or dynamically created by storage class
+
+Once a PV is created , it can be bound to a Persistent Volume Claim (PVC), which is a request for storage by a pod
+
+When a pod requests storage via PVC , K8S will search for a suitable PV to satisfy the requests
+
+PV is bound to the PVC and the pod can use the storage
+
+If no suitable PV is found, K8S will either dynamically create a new one (if the storage class support dynamic provisioning ) or the PVC will remain unbound
+
+PV will maintain total storage , PV Is bound to PVC
+Pods will ask PVC, PVC will get from PV
+
+
+PVC
+===
+
+TO use PV we need to claim the volume using PVC
+PVC request a PV with your desired specification(size, access, modes & speed etc) from K8S and once a suitable PV is found it will bound to PVC
+
+After bounding is done to pod you can mount is as a volume
+
+Once user finished work, the attached PV can be released the underlying PV can be reclaimed and recycled for future
+
+if you create volume in cluster , if cluster is delete , storage is also deleted. SO use AWS EBS Volumes
+
+
+First, create a EBS volume in EC2, with 10GB magnetic
+
+
+-- kubectl delete ns dev   [delete the namespace and come to default]
+-- kubectl config set-context --current --namespace=default
+
+vi pv.yml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: my-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  awsElasticBlockStore:
+    volumeID: vol-0771f0561f66408c9
+    fsType: ext4
+
+-- kubectl create -f pv.yml
+
+-- kubectl get pv
+
+
+----------------------------------------------------------------
+
+--- Now create pvc
+
+vi pvc.yml
+
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+
+-- kubectl create -f pvc.yml
+
+-- kubectl get pv   [ This will show pv and pvc both ]
+
+Note: kubectl get pvc is showing in pending state, because we need to create a new pods to consume first. kubectl get events -- see logs
+
+--Now lets setup a statefull application, statefull meaning, it will keep the previous data
+
+vi deploy.yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pvdeploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+     app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: centos
+        command: ["/bin/bash", "-c", "sleep 10000"]
+        volumeMounts:
+        - name: my-pv
+          mountPath: "/tmp/persistent"
+      volumes:
+        - name: my-pv
+          persistentVolumeClaim:
+            claimName: my-pvc
+
+
+-- kubectl create -f deploy.yml
+
+-- kubectl get pods
+
+Now lets go inside container to see the volume mount
+
+-- kubectl exec -it podid-dfgdkjjf -- /bin/bash
+
+-- cd /tmp
+
+-- ls
+
+-- cd persistent
+
+-- touch file{1..5}
+vi file1
+this is from pod-1 pv
+
+exit
+
+-- kubectl get pods
+
+lets delete the pod now, if we delete the pod, a new pod will be created automatically , data will not get deleted as it is in the persistent volume
+
+-- kubectl delete pods podid-rfgdfdjg
+
+-- kubectl get pods   [ you have a new pod ]
+
+--kubectl exec -it podid-dfdgh435 -- /bin/bash
+
+or
+
+-- kubectl exec -it podid-dfdgh435-- ls /tmp/persistent
+
+cd /tmp/persistent
+ls
+we can see the same data
+
+exit
+
+This is stateful
+
+=======================================================
+
+If you want to increase the size, increase EBS volume to 25
+
+kubectl describe pv  [ Capacity is shows 10gb only ]
+
+vi pv.yml
+in storage change to 20Gi
+
+kubectl apply -f pv.yml
+
+kubectl describe pv
+
+kubectl delete -f .   [Delete all deployments]
+
+===============================================================================================================
+
+Access Modes:
+
+	1) ReadWriteOnce
+
+	Volume can be mounted as Read-Write as Single node, multiple pods on that node can access it
+	
+	2) ReadOnlyMany
+
+	Volume can be mounted as Read Only by many nodes, no writes allowed
+	
+	3) ReadWriteMany
+
+	Volume can be mounted as Read-Write by multiple nodes at same time

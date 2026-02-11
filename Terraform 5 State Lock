@@ -1,0 +1,157 @@
+=====================================================
+Securing statefile in backend with State Lock option
+=====================================================
+
+
+State Lock:
+-----------
+
+State locking is a mechanism that prevents multiple Terraform processes from simultaneously attempting to modify the same state file. Without state locking, concurrent Terraform operations could corrupt the state file, leading to unpredictable behavior and infrastructure issues.
+
+“State locking happens automatically on all operations that could write state. You won’t see any message that it is happening. If state locking fails, Terraform will not continue. You can disable state locking for most commands with the -lock flag but it is not recommended.”
+
+
+
+First in S3, bucket delete the objects if any but not bucket. Because we can use the same bucket and backend
+
+For state locking, we use DynamoDB to store the statelocking mechanism , for that lets create a dynamodb table first
+
+Tablename: dynamodb-terraform-state-lock
+Column: LockID
+
+Note: you can create a dynamodb table using TF code also
+
+vi main.tf
+
+provider "aws" {
+  region = "ap-south-1"
+}
+
+terraform {
+  backend "s3" {
+
+    bucket         = "terraform-statefile-reyaz"
+    key            = "prod/terraform.tfstate"
+    encrypt        = true
+    dynamodb_table = "dynamodb-terraform-state-lock"
+    region         = "ap-south-1"
+  }
+}
+resource "aws_instance" "myfirstinstance" {
+  ami           = "ami-0492447090ced6eb5"
+  instance_type = "t2.micro"
+  tags = {
+    Name = "backend-example1"
+  }
+}
+
+-- terraform init
+
+-- terraform plan
+
+-- terraform apply --auto-approve
+
+[See the statefile in S3 and see the table in dynamoDB]
+
+================================================
+Mini Project - With actual real time File Structure
+==================================================
+
+├── backend.tf   -- contains S3 statefile with statelock in dynamodb
+├── main.tf      -- actual code
+├── output.tf    -- instance details as output
+├── terraform.tfvars  -- variables
+└── variables.tf   -- calling variables from tfvars
+
+
+vi backend.tf
+
+terraform {
+  backend "s3" {
+
+    bucket         = "terraform-statefile-reyaz"
+    key            = "prod/terraform.tfstate"
+    encrypt        = true
+    dynamodb_table = "dynamodb-terraform-state-lock"
+    region         = "ap-south-1"
+  }
+}
+
+--------------------------------
+
+vi terraform.tfvars
+
+ami           = "ami-08ee1453725d19cdb"
+instance_type = "t2.micro"
+key_name      = "MyKey"
+
+
+----------------------------------
+
+vi variables.tf
+
+variable "ami" {
+  description = "passing ami value"
+  type        = string
+  default     = ""
+
+}
+variable "instance_type" {
+  type    = string
+  default = ""
+
+}
+variable "key_name" {
+  type    = string
+  default = ""
+
+}
+
+--------------------------------------
+
+vi output.tf
+
+output "instance_public_ip" {
+  value     = aws_instance.myinstance.public_ip
+  sensitive = true
+}
+
+output "instance_id" {
+  value = aws_instance.myinstance.id
+}
+output "instance_public_dns" {
+  value = aws_instance.myinstance.public_dns
+
+}
+output "instance_arn" {
+  value = aws_instance.myinstance.arn
+
+}
+
+----------------------------------------
+
+vi main.tf
+
+resource "aws_instance" "myinstance" {
+  ami           = var.ami
+  instance_type = var.instance_type
+  key_name      = var.key_name
+  tags = {
+    Name = "my-ec2"
+  }
+}
+
+
+---------------------------------------
+
+-- terraform init
+
+-- terraform plan
+
+-- terraform apply --auto-approve
+
+Note: see the resources, S3 and DynamoDB
+
+-- terraform destroy --auto-approve
+
+From <https://classroom.google.com/u/0/c/NzI3MTQ1MzU3NjIz> 
